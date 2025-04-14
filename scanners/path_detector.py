@@ -52,12 +52,15 @@ class PathDetector:
     PATH_THREAD_COUNT = 3  # 使用独立的3个线程池进行路径探测
     HASH_THRESHOLD = 5  # 哈希值重复次数阈值
 
-    def __init__(self, paths, proxy_manager):
+    def __init__(self, paths, proxy_manager, custom_headers=None):
         self.paths = paths
         self.proxy = proxy_manager.get_proxy()
         self.thread_local = threading.local()  # 创建线程本地存储
         self.hash_counter = {}  # 哈希值计数器
         self.lock = threading.Lock()  # 用于线程安全的锁
+        self.headers = DEFAULT_HEADER.copy()
+        if custom_headers:
+            self.headers.update(custom_headers)
 
     def detect(self, url):
         """检测指定URL的敏感路径"""
@@ -175,7 +178,7 @@ class PathDetector:
         """获取线程本地的 Session 对象，如果不存在则创建"""
         if not hasattr(self.thread_local, 'session'):
             session = requests.Session()
-            session.headers.update(DEFAULT_HEADER)
+            session.headers.update(self.headers)
             session.verify = False
             session.proxies = self.proxy
             session.timeout = TIMEOUT

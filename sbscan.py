@@ -28,6 +28,7 @@ system_lang = locale.getlocale()[0]
 @click.option("-f", "--file", help="读取文件中的url进行扫描", type=click.Path(exists=True))
 @click.option("-m", "--mode", type=str, help="扫描模式选择: [path/cve/all], 默认all", default="all")
 @click.option("-p", "--proxy", type=str, help="指定HTTP代理，支持单个代理、逗号分隔的多个代理或代理文件")
+@click.option("-H", "--header", type=str, help="指定Header，格式为'Name:Value'，多个请求头用逗号分隔")
 @click.option("-t", "--threads", type=int, help="并发线程数, 默认50个线程", default=50)
 @click.option("-ff", "--fingerprint_filter", is_flag=True, help="只对存在spring指纹的网站开始扫描")
 @click.option("-d", "--dnslog", type=str, help="指定dnslog域名", default="")
@@ -35,10 +36,10 @@ system_lang = locale.getlocale()[0]
 @click.option("-h", "--help", is_flag=True, callback=lambda ctx, param, value: ctx.exit(
     click.secho(help_info_zh if system_lang and system_lang.startswith("zh_CN") else help_info_en,
                 fg='cyan') or 0) if value else None, expose_value=False, help="显示帮助信息")
-def main(url, file, mode, proxy, dnslog, threads, fingerprint_filter, quiet):
+def main(url, file, mode, proxy, header, dnslog, threads, fingerprint_filter, quiet):
     try:
         # 参数解析与验证
-        args_parser = ArgumentParser(url, file, proxy, threads)
+        args_parser = ArgumentParser(url, file, proxy, header, threads)
         args_data = args_parser.parse_and_validate()  # 解析后的代理列表为 List[Dict[str, str]]
         logger.debug(args_data)
 
@@ -50,7 +51,7 @@ def main(url, file, mode, proxy, dnslog, threads, fingerprint_filter, quiet):
 
         # 扫描管理
         manager = ScannerManager(args_data["urls"], mode, proxy_manager, dnslog, args_data["threads"],
-                                 fingerprint_filter, quiet)
+                                 fingerprint_filter, quiet, args_data.get("headers", {}))
         click.secho("[+] 扫描时间部分情况下可能稍长，请耐心等待扫描结果[Please wait for the scan results]:", fg='green',
                     bold=True)
         logger.info("Starting scan for target URLs")

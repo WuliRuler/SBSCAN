@@ -12,6 +12,7 @@ from utils.global_thread_pool import GlobalThreadPool
 from requests import Session, RequestException
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+from utils.custom_headers import DEFAULT_HEADER
 
 # 初始化日志记录
 logger = configure_logger(__name__)
@@ -20,21 +21,26 @@ logger = configure_logger(__name__)
 class CVEScanner:
     """CVE 漏洞扫描器类"""
 
-    def __init__(self, cve_data, proxy_manager):
+    def __init__(self, cve_data, proxy_manager, custom_headers=None):
         """
         初始化 CVE 漏洞扫描器
         :param cve_data: 从配置文件中加载的 CVE 漏洞信息
         :param proxy_manager: 代理管理器实例
+        :param custom_headers: 自定义请求头
         """
         self.cve_data = cve_data
         self.proxy = proxy_manager.get_proxy() if proxy_manager else None
         self.thread_local = threading.local()  # 创建线程本地存储
+        self.headers = DEFAULT_HEADER.copy()
+        if custom_headers:
+            self.headers.update(custom_headers)
         self._initialize_session()  # 初始化线程本地的 Session 对象
 
     def _initialize_session(self):
         """初始化线程本地的 Session 对象，进行会话复用"""
         if not hasattr(self.thread_local, 'session'):
             session = Session()
+            session.headers.update(self.headers)
             session.proxies = self.proxy
             session.verify = False
 

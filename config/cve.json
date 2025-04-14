@@ -28,7 +28,7 @@
     "desc": "Spring Data Commons 远程代码执行漏洞，攻击者可构造包含有恶意代码的SPEL表达式实现远程代码攻击，直接获取服务器控制权限。"
   },
   "JeeSpringCloud_2023_uploadfile": {
-        "is_poc": "true",
-        "description": "JeeSpringCloud uploadFile.jsp 存在任意文件上传漏洞 2023"
+    "is_poc": "true",
+    "description": "JeeSpringCloud uploadFile.jsp 存在任意文件上传漏洞 2023"
   }
 }

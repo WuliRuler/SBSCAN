@@ -20,7 +20,7 @@ logger = configure_logger(__name__)
 
 class ScannerManager:
     def __init__(self, target_urls, mode, proxy_manager, dns_domain, max_threads, fingerprint_filter=False,
-                 quiet=False):
+                 quiet=False, custom_headers=None):
         self.target_urls = target_urls
         self.mode = mode
         self.proxy_manager = proxy_manager
@@ -28,17 +28,18 @@ class ScannerManager:
         self.max_threads = max_threads
         self.quiet = quiet
         self.fingerprint_filter = fingerprint_filter
+        self.custom_headers = custom_headers or {}
 
         # 创建Path扫描器的实例，并使用全局会话复用
         paths_config = ConfigLoader.load_config("config/path.json")
-        self.path_detector = PathDetector(paths_config, self.proxy_manager)
+        self.path_detector = PathDetector(paths_config, self.proxy_manager, self.custom_headers)
 
         # 创建CVE扫描器的实例，并使用全局会话复用
         cve_config = ConfigLoader.load_config("config/cve.json") or {}
-        self.cve_scanner = CVEScanner(cve_config, self.proxy_manager)
+        self.cve_scanner = CVEScanner(cve_config, self.proxy_manager, self.custom_headers)
 
         # 指纹检测器
-        self.fingerprint_detector = FingerprintDetector(self.proxy_manager)
+        self.fingerprint_detector = FingerprintDetector(self.proxy_manager, self.custom_headers)
 
     def _perform_fingerprint_detection(self, url):
         """指纹检测"""

@@ -11,6 +11,7 @@ from typing import List, Dict, Optional, Union
 from utils.format_utils import FormatterUtils
 from utils.logging_config import configure_logger
 from utils.global_thread_pool import GlobalThreadPool
+from utils.custom_headers import DEFAULT_HEADER
 import os
 
 # 初始化日志记录
@@ -18,10 +19,11 @@ logger = configure_logger(__name__)
 
 
 class ArgumentParser:
-    def __init__(self, url: Optional[str], file: Optional[str], proxy: Optional[str], threads: int):
+    def __init__(self, url: Optional[str], file: Optional[str], proxy: Optional[str], header: Optional[str], threads: int):
         self.url = url
         self.file = file
         self.proxy = proxy
+        self.header = header
         self.threads = threads
         self.format_util = FormatterUtils()
 
@@ -41,6 +43,38 @@ class ArgumentParser:
         """
         if not self.url and not self.file:
             self.raise_value_error("No URL or file provided. Usage: python3 sbscan.py -h/--help")
+
+    def parse_headers(self) -> Dict[str, str]:
+        """
+        解析自定义请求头
+        :return: 合并后的请求头字典
+        """
+        headers = DEFAULT_HEADER.copy()
+        
+        if not self.header:
+            return headers
+            
+        try:
+            # 分割多个请求头
+            custom_headers = self.header.split(',')
+            for header in custom_headers:
+                if ':' not in header:
+                    logger.warning(f"Invalid header format: {header}, skipping...")
+                    continue
+                    
+                name, value = header.split(':', 1)
+                name = name.strip()
+                value = value.strip()
+                
+                if name and value:
+                    headers[name] = value
+                else:
+                    logger.warning(f"Empty header name or value: {header}, skipping...")
+                    
+            return headers
+        except Exception as e:
+            logger.error(f"Error parsing headers: {e}")
+            return headers
 
     def get_formatted_proxy(self) -> List[Dict[str, str]]:
         """
@@ -142,27 +176,29 @@ class ArgumentParser:
 
         return self.validate_and_format_urls(raw_urls)
 
-    def parse_and_validate(self) -> Dict[str, Union[List[str], List[Dict[str, str]], int]]:
+    def parse_and_validate(self) -> Dict[str, Union[List[str], List[Dict[str, str]], int, Dict[str, str]]]:
         """
         解析和验证所有参数，并返回格式化后的结果
-        :return: 包含 'urls', 'proxy' 和 'threads' 的字典
+        :return: 包含 'urls', 'proxy', 'threads' 和 'headers' 的字典
         """
         self.validate_url_file()
         formatted_proxy = self.get_formatted_proxy()  # 支持多代理解析
         urls = self.extract_and_validate_urls()
+        headers = self.parse_headers()  # 解析自定义请求头
 
-        logger.info(f"Validated arguments: URLs={len(urls)}, Proxies={len(formatted_proxy)}, Threads={self.threads}")
+        logger.info(f"Validated arguments: URLs={len(urls)}, Proxies={len(formatted_proxy)}, Threads={self.threads}, Headers={len(headers)}")
 
         return {
             "urls": urls,
             "proxy": formatted_proxy,
-            "threads": self.threads
+            "threads": self.threads,
+            "headers": headers
         }
 
 
 if __name__ == '__main__':
     # 测试用例
-    c1 = ArgumentParser("", "../url.txt", "http://user:password@host1:port1,http://user:password@host2:port2", 5)
-    c2 = ArgumentParser("https://example.com", "", None, 5)
+    c1 = ArgumentParser("", "../url.txt", "http://user:password@host1:port1,http://user:password@host2:port2", None, 5)
+    c2 = ArgumentParser("https://example.com", "", None, None, 5)
     print(c1.parse_and_validate())  # 返回解析后的代理池和 URL 列表
     print(c2.parse_and_validate())  # 无代理情况下的解析

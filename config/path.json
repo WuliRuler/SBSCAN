@@ -1,4 +1,5 @@
 {
+  "headers":"",
   "actuator": "_links",
   "actuator/beans": "beans",
   "actuator/caches": "cacheManagers",

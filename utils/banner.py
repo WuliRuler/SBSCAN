@@ -17,6 +17,7 @@ python3 sbscan.py [OPTIONS]
     -f  --file: Read URLs from a file for scanning
     -m  --mode: Scan mode selection: [path/cve/all], default is 'all'
     -p  --proxy: Specify an HTTP proxy
+    -H  --header: Specify custom HTTP headers, format: 'Name:Value', multiple headers separated by commas
     -t  --threads: Number of concurrent threads, default is single-threaded
     -ff  --fingerprint_filter: Scan only websites with a Spring fingerprint
     -d  --dnslog: Specify a dnslog domain
@@ -31,6 +32,7 @@ python3 sbscan.py [OPTIONS]
     -f  --file: 从文件读取URL进行扫描
     -m  --mode: 扫描模式选择: [path/cve/all], 默认为'all'
     -p  --proxy: 指定HTTP代理
+    -H  --header: 指定自定义HTTP请求头，格式：'Name:Value'，多个请求头用逗号分隔
     -t  --threads: 并发线程数, 默认单线程
     -ff  --fingerprint_filter: 只对存在Spring指纹的网站进行扫描
     -d  --dnslog: 指定dnslog域名

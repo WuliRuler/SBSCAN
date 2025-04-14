@@ -25,9 +25,12 @@ class FingerprintDetector:
     SPRING_FAVICON_HASH = "0488faca4c19046b94d07c3ee83cf9d6"
     PATHS = ["/favicon.ico", "/"]
 
-    def __init__(self, proxy_manager):
+    def __init__(self, proxy_manager, custom_headers=None):
         self.proxy = proxy_manager.get_proxy()
         self.thread_local = threading.local()  # 创建线程本地存储
+        self.headers = DEFAULT_HEADER.copy()
+        if custom_headers:
+            self.headers.update(custom_headers)
 
     def is_spring_app(self, url):
         """检测目标站点是否使用Spring框架"""
@@ -67,8 +70,9 @@ class FingerprintDetector:
         """向指定的URL发起请求并返回响应"""
         session = self._get_session()  # 获取线程本地的 Session 对象
         try:
-            response = session.get(url, headers=DEFAULT_HEADER, proxies=self.proxy, timeout=TIMEOUT, verify=False)
+            response = session.get(url, headers=self.headers, proxies=self.proxy, timeout=TIMEOUT, verify=False)
             if response.content:
+                print(response_content)
                 return response
         except requests.RequestException as e:
             logger.debug(f"Request error: {e}", extra={"target": url})
@@ -80,7 +84,7 @@ class FingerprintDetector:
         """获取线程本地的 Session 对象，如果不存在则创建"""
         if not hasattr(self.thread_local, 'session'):
             session = requests.Session()
-            session.headers.update(DEFAULT_HEADER)
+            session.headers.update(self.headers)
             session.verify = False
             session.proxies = self.proxy
             session.timeout = TIMEOUT
