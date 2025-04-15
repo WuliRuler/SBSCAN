@@ -78,6 +78,7 @@ BashCopy code
 -f, --file                             Scan targets from a file containing URLs
 -m, --mode                             Specify the scanner mode[path/cve/all],default all
 -p, --proxy                            Specify an HTTP proxy
+-H --header                            Specifies the custom HTTP request header. The format is 'Name:Value'. Multiple request headers are separated by commas (,)
 -t, --threads                          Specify the number of threads
 -q, --quiet                            Enable clean output, only display sensitive path hits
 -ff, --fingerprint_filter              Enable fingerprint detection, only the sites that detect spring fingerprints will be scanned in the next step (it may cause missing reports, please select whether to enable it according to the actual situation
