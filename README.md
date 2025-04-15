@@ -78,6 +78,7 @@ sbscan [参数]
 -f, --file                             读取文件中的url目标进行扫描
 -m, --mode                             指定扫描模式[path/cve/all],默认all
 -p, --proxy                            指定HTTP代理
+-H  --header                           指定自定义HTTP请求头，格式：'Name:Value'，多个请求头用逗号分隔
 -t, --threads                          指定线程数量
 -q, --quiet                            启用纯净输出,只输出命中的敏感路径信息
 -ff, --fingerprint_filter              启用指纹检测,只扫描命中指纹的站点(可能有漏报，结合实际情况选择是否启用)
