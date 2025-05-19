@@ -44,13 +44,14 @@ def is_vulnerable(response_text, conditions):
     """
     return all(condition in response_text for condition in conditions)
 
-def check(url, dns_domain="", proxies=None, session=None):
+def check(url, dns_domain="", proxies=None, session=None, timeout=TIMEOUT):
     """
     检测 CVE-2021-21234 路径遍历漏洞
     :param url: 待检测的目标 URL
     :param dns_domain: DNS 日志域名（不使用，仅保持接口一致性）
     :param proxies: 代理配置（可选）
     :param session: 复用的 Session 实例（可选）
+    :param timeout: 请求超时时间（秒）
     :return: 如果存在漏洞，返回 (True, 详细信息字典)，否则返回 (False, {})
     """
     # 使用传入的 session，如果没有则创建新的 session（用于单独测试时）
@@ -60,8 +61,8 @@ def check(url, dns_domain="", proxies=None, session=None):
         for payload in PAYLOADS:
             target_url = urljoin(url, payload["path"])
 
-            # 发送 GET 请求，测试路径遍历漏洞
-            response = session.get(target_url, headers=DEFAULT_HEADER, timeout=TIMEOUT, verify=False, proxies=proxies)
+            # 发送 GET 请求，测试路径遍历漏洞，使用传入的timeout参数
+            response = session.get(target_url, headers=DEFAULT_HEADER, timeout=timeout, verify=False, proxies=proxies)
 
             # 输出调试信息
             logger.debug(Fore.CYAN + f"[{response.status_code}]" + Fore.BLUE + f"[{response.headers}]", extra={"target": target_url})

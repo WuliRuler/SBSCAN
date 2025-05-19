@@ -12,3 +12,4 @@ reports/
 test/
 url.txt
 .vscode/
+*.pyc

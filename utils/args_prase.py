@@ -85,23 +85,42 @@ class ArgumentParser:
             logger.debug("Unspecified proxy")
             return []
 
-        # 如果是文件格式的代理配置，读取文件内容
-        if os.path.isfile(self.proxy):
+        # 优化判断逻辑：先检查是否是HTTP代理格式
+        # 如果是明确的HTTP代理格式（以http://或https://开头），或者包含端口号（如 ip:port），直接作为代理处理
+        if self.proxy.lower().startswith(('http://', 'https://')) or ':' in self.proxy and not self.proxy.lower().startswith('file://'):
+            # 如果包含逗号，则视为多个代理
+            if "," in self.proxy:
+                logger.info(f"Loading proxy list from comma-separated values: {self.proxy}")
+                proxy_list = self.proxy.split(",")
+                return [self.format_util.format_proxy(proxy.strip()) for proxy in proxy_list if proxy.strip()]
+            
+            # 单个代理
+            formatted_proxy = self.format_util.format_proxy(self.proxy)
+            if formatted_proxy:
+                return [formatted_proxy]
+            else:
+                self.raise_value_error("Invalid Proxy provided. Exiting...")
+        
+        # 如果以file://开头，明确指定为文件
+        elif self.proxy.lower().startswith('file://'):
+            file_path = self.proxy[7:]  # 去除file://前缀
+            if os.path.isfile(file_path):
+                logger.info(f"Loading proxy list from file: {file_path}")
+                return self._load_proxies_from_file(file_path)
+            else:
+                self.raise_value_error(f"Proxy file not found: {file_path}")
+        
+        # 如果是文件路径且文件存在，则作为代理文件处理
+        elif os.path.isfile(self.proxy):
             logger.info(f"Loading proxy list from file: {self.proxy}")
             return self._load_proxies_from_file(self.proxy)
-
-        # 如果是逗号分隔的代理列表，分割为多个代理
-        if "," in self.proxy:
-            logger.info(f"Loading proxy list from comma-separated values: {self.proxy}")
-            proxy_list = self.proxy.split(",")
-            return [self.format_util.format_proxy(proxy.strip()) for proxy in proxy_list if proxy.strip()]
-
-        # 单个代理配置，转换为列表
+        
+        # 尝试作为单个代理处理
         formatted_proxy = self.format_util.format_proxy(self.proxy)
         if formatted_proxy:
             return [formatted_proxy]
         else:
-            self.raise_value_error("Invalid Proxy provided. Exiting...")
+            self.raise_value_error(f"Invalid proxy format or file not found: {self.proxy}")
 
     def _load_proxies_from_file(self, file_path: str) -> List[Dict[str, str]]:
         """
@@ -114,10 +133,16 @@ class ArgumentParser:
             with open(file_path, 'r') as file:
                 for line in file:
                     proxy = line.strip()
-                    if proxy:
+                    if proxy and not proxy.startswith('#'):  # 忽略空行和注释行
                         formatted_proxy = self.format_util.format_proxy(proxy)
                         if formatted_proxy:
                             proxies.append(formatted_proxy)
+            
+            if not proxies:
+                logger.warning(f"No valid proxies found in file: {file_path}")
+            else:
+                logger.info(f"Loaded {len(proxies)} proxies from file: {file_path}")
+                
             return proxies
         except Exception as e:
             logger.error(f"Failed to read proxy file: {file_path}. Error: {e}")

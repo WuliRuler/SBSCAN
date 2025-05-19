@@ -30,13 +30,14 @@ VULNERABLE_SIGNS = [
 ]
 
 
-def check(url, dns_domain="", proxies=None, session=None):
+def check(url, dns_domain="", proxies=None, session=None, timeout=TIMEOUT):
     """
     对给定的目标 URL 检测 CVE-2020-5410 路径遍历漏洞
     :param url: 待检测的目标 URL
     :param dns_domain: DNS 日志域名（不需要使用，但为了保持接口一致性）
     :param proxies: 代理配置
     :param session: 复用的 Session 实例（可选）
+    :param timeout: 请求超时时间（秒）
     :return: 如果存在漏洞，返回 (True, 详细信息字典)，否则返回 (False, {})
     """
     # 构建目标 URL
@@ -47,7 +48,7 @@ def check(url, dns_domain="", proxies=None, session=None):
         session = session or requests.Session()
 
         # 发送 GET 请求，测试路径遍历漏洞
-        res = session.get(target_url, headers=DEFAULT_HEADER, timeout=TIMEOUT, verify=False, proxies=proxies)
+        res = session.get(target_url, headers=DEFAULT_HEADER, timeout=timeout, verify=False, proxies=proxies)
 
         # 输出调试信息
         logger.debug(Fore.CYAN + f"[{res.status_code}]" + Fore.BLUE + f"[{res.headers}]", extra={"target": target_url})

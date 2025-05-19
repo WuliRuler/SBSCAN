@@ -34,17 +34,32 @@ class FingerprintDetector:
 
     def is_spring_app(self, url):
         """检测目标站点是否使用Spring框架"""
+        logger.debug(f"开始检测目标是否为Spring应用: {url}")
+        
         # 使用全局线程池并发检测所有预定义路径
         futures = {GlobalThreadPool.submit_task(self._make_request, urljoin(url, path)): path for path in self.PATHS}
+        
         for future in futures:
             try:
+                path = futures[future]
+                logger.debug(f"检测路径: {urljoin(url, path)}")
                 response = future.result()
-                if response and (self._is_spring_by_favicon(response) or self._is_spring_by_content(response) or self._is_spring_by_header(response)):
-                    logger.info(f"Target is a Spring application.", extra={"target": url})
-                    return True
+                
+                if response:
+                    # 检查各种识别方法
+                    is_spring_favicon = self._is_spring_by_favicon(response)
+                    is_spring_content = self._is_spring_by_content(response)
+                    is_spring_header = self._is_spring_by_header(response)
+                    
+                    logger.debug(f"指纹检测结果 - Favicon: {is_spring_favicon}, 内容: {is_spring_content}, 头信息: {is_spring_header}")
+                    
+                    if is_spring_favicon or is_spring_content or is_spring_header:
+                        logger.info(f"目标是Spring应用", extra={"target": url})
+                        return True
             except Exception as e:
-                logger.error(f"Error during Spring fingerprint detection: {e}", extra={"target": url})
-        logger.info(f"Target is not a Spring application.", extra={"target": url})
+                logger.error(f"Spring指纹检测发生错误: {e}", extra={"target": url})
+                
+        logger.info(f"目标不是Spring应用", extra={"target": url})
         return False
 
     @staticmethod
@@ -70,14 +85,23 @@ class FingerprintDetector:
         """向指定的URL发起请求并返回响应"""
         session = self._get_session()  # 获取线程本地的 Session 对象
         try:
+            logger.debug(f"发送请求: {url}")
             response = session.get(url, headers=self.headers, proxies=self.proxy, timeout=TIMEOUT, verify=False)
             if response.content:
-                print(response_content)
+                logger.debug(f"请求成功: {url}, 状态码: {response.status_code}, 内容长度: {len(response.content)}")
                 return response
+            else:
+                logger.debug(f"请求成功但无内容: {url}, 状态码: {response.status_code}")
+        except requests.exceptions.ConnectTimeout as e:
+            logger.debug(f"连接超时: {url}, 错误: {str(e)}", extra={"target": url})
+        except requests.exceptions.ReadTimeout as e:
+            logger.debug(f"读取超时: {url}, 错误: {str(e)}", extra={"target": url})
+        except requests.exceptions.ConnectionError as e:
+            logger.debug(f"连接错误: {url}, 错误: {str(e)}", extra={"target": url})
         except requests.RequestException as e:
-            logger.debug(f"Request error: {e}", extra={"target": url})
+            logger.debug(f"请求错误: {url}, 错误: {str(e)}", extra={"target": url})
         except Exception as e:
-            logger.error(f"An unexpected error occurred during fingerprint detection: {e}", extra={"target": url})
+            logger.error(f"指纹检测中发生意外错误: {url}, 错误: {str(e)}", extra={"target": url})
         return None
 
     def _get_session(self):

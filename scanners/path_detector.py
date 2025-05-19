@@ -48,7 +48,7 @@ class PathDetector:
     MAX_SUCCESS_COUNT = 50
     CHUNK_SIZE = 1024
     SSE_MAX_SIZE = 5120  # 5KB
-    MAX_RESPONSE_LENGTH = 102400  # 100KB
+    MAX_RESPONSE_LENGTH = 51200  # 减少到50KB，避免过多内存占用
     PATH_THREAD_COUNT = 3  # 使用独立的3个线程池进行路径探测
     HASH_THRESHOLD = 5  # 哈希值重复次数阈值
 
@@ -62,11 +62,35 @@ class PathDetector:
         if custom_headers:
             self.headers.update(custom_headers)
 
-    def detect(self, url):
-        """检测指定URL的敏感路径"""
+    def detect(self, url, parent_pbar=None, path_weight=0.4, total_urls=1):
+        """检测指定URL的敏感路径
+        :param url: 扫描目标URL
+        :param parent_pbar: 父进度条
+        :param path_weight: 路径扫描在总进度中的权重(0-1)
+        :param total_urls: 总URL数量，用于计算每个URL的进度增量
+        :return: 检测到的敏感路径列表
+        """
         path_failed_count = 0
         path_success_count = 0
         detected_paths = []
+
+        # 获取路径总数用于进度显示
+        total_paths = len(self.paths)
+        completed_paths = 0
+        
+        # 计算每个路径完成对应的进度增量
+        # 路径扫描总共占path_weight的进度，平均分配给每个路径
+        if total_paths > 0 and parent_pbar:
+            path_increment = (path_weight / total_urls) / total_paths
+        else:
+            path_increment = 0
+            
+        # 初始化路径扫描状态
+        if parent_pbar:
+            with self.lock:
+                status_info = f"路径扫描 (0/{total_paths})"
+                parent_pbar.set_description(status_info)
+                parent_pbar.refresh()
 
         # 重置哈希值计数器
         self.hash_counter = {}
@@ -82,6 +106,19 @@ class PathDetector:
                     if result:
                         detected_paths.append(result)
                         path_success_count += 1
+                        
+                    # 更新进度信息
+                    completed_paths += 1
+                    if parent_pbar:
+                        with self.lock:  # 使用已有的锁
+                            # 只显示已完成的路径数和总路径数，不显示URL
+                            status_info = f"路径扫描 ({completed_paths}/{total_paths})"
+                            parent_pbar.set_description(status_info)
+                            # 直接更新进度值，确保路径扫描总共占path_weight的进度
+                            # 检查进度是否已经达到或超过100%
+                            if parent_pbar.n + path_increment <= parent_pbar.total:
+                                parent_pbar.update(path_increment)
+                            parent_pbar.refresh()
 
                     if path_success_count > self.MAX_SUCCESS_COUNT:
                         logger.info(f"Exceeded maximum success count of {self.MAX_SUCCESS_COUNT}, stopping path detection for {url}")
@@ -89,6 +126,12 @@ class PathDetector:
 
                 except Exception as e:
                     path_failed_count += 1
+                    completed_paths += 1  # 错误也计入完成
+                    # 错误也更新进度
+                    if parent_pbar:
+                        with self.lock:
+                            parent_pbar.update(path_increment)
+                            parent_pbar.refresh()
                     logger.error(f"Error detecting path: {path} - {e}", extra={"target": url})
 
                 if path_failed_count > self.MAX_FAILED_COUNT:
@@ -111,8 +154,15 @@ class PathDetector:
         session = self._get_session()  # 获取线程本地的 Session 对象
         try:
             with session.get(url, stream=True, allow_redirects=False) as res:
+                # 检查响应头，避免下载过大内容
+                content_length = res.headers.get('Content-Length')
+                if content_length and int(content_length) > self.MAX_RESPONSE_LENGTH:
+                    logger.debug(f"跳过大文件: {url}, Content-Length: {content_length}", extra={"target": url})
+                    # 返回部分内容进行签名检查
+                    return res.text[:min(5000, self.MAX_RESPONSE_LENGTH)]
+                
                 if "text/event-stream" in res.headers.get("Content-Type", ""):
-                    # SSE 流式传输处理
+                    # SSE 流式传输处理，使用流式读取避免内存问题
                     content = b""
                     for chunk in res.iter_content(self.CHUNK_SIZE):
                         content += chunk
@@ -124,8 +174,20 @@ class PathDetector:
                     blinking_effect = "\033[5m"
                     # 修改logger.info调用，输出红色闪动的成功消息
                     logger.info(f"{blinking_effect}{Fore.RED} [{res.status_code}] [Content-Length: {res.headers.get('Content-Length', 0)}] {Fore.CYAN}<-- [Success] {Fore.RESET}", extra={"target": url})
-                    # 返回前 MAX_RESPONSE_LENGTH 的内容
-                    response_content = res.text[:self.MAX_RESPONSE_LENGTH]
+                    
+                    # 使用增量读取，避免一次性加载大文件
+                    response_content = ""
+                    content_size = 0
+                    for chunk in res.iter_content(chunk_size=self.CHUNK_SIZE, decode_unicode=True):
+                        if isinstance(chunk, bytes):
+                            chunk = chunk.decode('utf-8', errors='ignore')
+                        response_content += chunk
+                        content_size += len(chunk)
+                        
+                        # 如果已读取内容超过最大限制，截断并停止读取
+                        if content_size >= self.MAX_RESPONSE_LENGTH:
+                            logger.debug(f"响应内容超过最大限制 ({self.MAX_RESPONSE_LENGTH} bytes)，已截断", extra={"target": url})
+                            break
                 else:
                     logger.info(f"[{res.status_code}] [Content-Length: {res.headers.get('Content-Length', 0)}]", extra={"target": url})
                     return None
@@ -158,20 +220,35 @@ class PathDetector:
 
     def _retry_with_different_ssl_version(self, session, url):
         """尝试使用不同的 SSL/TLS 版本重新发起请求"""
-        ssl_versions = [ssl.PROTOCOL_TLSv1, ssl.PROTOCOL_TLSv1_1, ssl.PROTOCOL_TLSv1_2]
+        # 减少重试版本数量，只使用最新的TLS版本
+        ssl_versions = [ssl.PROTOCOL_TLSv1_2]  # 只使用TLSv1.2，更现代且安全
         for version in ssl_versions:
             try:
                 # 使用不同的 SSL 版本进行重试
                 ssl_adapter = SSLAdapter(ssl_version=version)
                 session.mount('https://', ssl_adapter)
+                logger.debug(f"尝试使用TLSv1.2重连: {url}")
                 with session.get(url, stream=True, allow_redirects=False) as res:
                     if res.status_code == 200:
-                        logger.info(f"Successfully connected using SSL version: {version}", extra={"target": url})
-                        return res.text[:self.MAX_RESPONSE_LENGTH]
+                        logger.info(f"使用TLSv1.2成功连接: {url}")
+                        # 使用相同的增量读取逻辑
+                        response_content = ""
+                        content_size = 0
+                        for chunk in res.iter_content(chunk_size=self.CHUNK_SIZE, decode_unicode=True):
+                            if isinstance(chunk, bytes):
+                                chunk = chunk.decode('utf-8', errors='ignore')
+                            response_content += chunk
+                            content_size += len(chunk)
+                            
+                            # 如果已读取内容超过最大限制，截断并停止读取
+                            if content_size >= self.MAX_RESPONSE_LENGTH:
+                                logger.debug(f"SSL重试响应内容超过最大限制 ({self.MAX_RESPONSE_LENGTH} bytes)，已截断", extra={"target": url})
+                                break
+                        return response_content
             except requests.exceptions.SSLError as ssl_error:
-                logger.warning(f"Retry with SSL version {version} failed: {ssl_error}", extra={"target": url})
+                logger.warning(f"使用TLSv1.2重试失败: {ssl_error}", extra={"target": url})
             except Exception as e:
-                logger.error(f"An unexpected error occurred during SSL retry: {e}", extra={"target": url})
+                logger.error(f"SSL重试过程中发生意外错误: {e}", extra={"target": url})
         return None
 
     def _get_session(self):
